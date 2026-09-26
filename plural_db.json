@@ -1,0 +1,694 @@
+{
+  "reports": [
+    {
+      "id": "rpt-001",
+      "status": "AWAITING_VERIFICATION",
+      "candidate": {
+        "name": "Alex Chen",
+        "email": "alex.chen@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+        "role": "Senior Backend Engineer Candidate"
+      },
+      "task": {
+        "id": "task-auth-ratelimit",
+        "title": "Refactor Authentication & Rate Limiting Module",
+        "description": "Implement an enterprise-grade rate limiter with sliding window token bucket, Redis atomic locks, and fallback memory caching.",
+        "timeLimitMinutes": 120,
+        "complexity": "Senior"
+      },
+      "sessionDuration": "1h 42m",
+      "completedAt": "2026-09-26T18:45:00.000Z",
+      "createdAt": "2026-09-26T17:03:00.000Z",
+      "updatedAt": "2026-09-26T18:45:00.000Z",
+      "dimensionScores": [
+        {
+          "id": "ds-101",
+          "reportId": "rpt-001",
+          "dimension": "delegation",
+          "score": 4.5,
+          "observation": "Effectively partitioned complex rate limiting architecture into modular AI prompt sub-tasks while maintaining architectural control.",
+          "keyTakeaway": "Mastered modular prompt decomposition without delegating high-level system design decisions."
+        },
+        {
+          "id": "ds-102",
+          "reportId": "rpt-001",
+          "dimension": "description",
+          "score": 4.2,
+          "observation": "Provided precise functional constraints regarding HTTP status codes, reset headers, and Redis key namespace conventions.",
+          "keyTakeaway": "High clarity in technical specifications reduced iteration cycles with the AI assistant."
+        },
+        {
+          "id": "ds-103",
+          "reportId": "rpt-001",
+          "dimension": "discernment",
+          "score": 3.8,
+          "observation": "Spotted a subtle non-atomic Redis GET/SET race condition in AI output and demanded a Lua script rewrite.",
+          "keyTakeaway": "Showed strong critical evaluation of generated code, though initially overlooked a minor HTTP header timestamp bug."
+        },
+        {
+          "id": "ds-104",
+          "reportId": "rpt-001",
+          "dimension": "diligence",
+          "score": 4.8,
+          "observation": "Thoroughly tested sub-millisecond burst limits, simulated Redis node drops, and implemented a robust local memory fallback.",
+          "keyTakeaway": "Exceptional test coverage and failure-mode resiliency."
+        }
+      ],
+      "finalArtifact": {
+        "id": "art-001",
+        "reportId": "rpt-001",
+        "title": "Distributed Sliding Window Rate Limiter",
+        "filename": "rate_limiter.ts",
+        "language": "typescript",
+        "summary": "Production-ready TypeScript rate limiting middleware supporting sliding window algorithm with atomic Redis Lua script and fallback LRU cache.",
+        "linesOfCode": 184,
+        "content": "import { Redis } from 'ioredis';\nimport { LRUCache } from 'lru-cache';\n\nexport interface RateLimitOptions {\n  windowMs: number;\n  maxRequests: number;\n  keyPrefix?: string;\n}\n\nexport interface RateLimitResult {\n  allowed: boolean;\n  limit: number;\n  remaining: number;\n  resetTimeMs: number;\n  source: 'redis' | 'memory_fallback';\n}\n\nconst LUA_TOKEN_BUCKET_SCRIPT = `\n  local key = KEYS[1]\n  local now = tonumber(ARGV[1])\n  local windowMs = tonumber(ARGV[2])\n  local maxReqs = tonumber(ARGV[3])\n  local clearBefore = now - windowMs\n\n  redis.call('ZREMRANGEBYSCORE', key, 0, clearBefore)\n  local currentReqs = redis.call('ZCARD', key)\n\n  if currentReqs < maxReqs then\n    redis.call('ZADD', key, now, now)\n    redis.call('PEXPIRE', key, windowMs)\n    return {1, maxReqs - currentReqs - 1, now + windowMs}\n  else\n    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')\n    local resetMs = tonumber(oldest[2]) + windowMs\n    return {0, 0, resetMs}\n  end\n`;\n\nexport class RateLimiter {\n  private redis: Redis | null;\n  private memoryCache: LRUCache<string, number[]>;\n  private luaSha: string | null = null;\n\n  constructor(redisClient?: Redis, private options: RateLimitOptions = { windowMs: 60000, maxRequests: 100 }) {\n    this.redis = redisClient || null;\n    this.memoryCache = new LRUCache<string, number[]>({\n      max: 5000,\n      ttl: options.windowMs,\n    });\n  }\n\n  async checkLimit(identifier: string): Promise<RateLimitResult> {\n    const key = `${this.options.keyPrefix || 'ratelimit'}:${identifier}`;\n    const now = Date.now();\n\n    if (this.redis && this.redis.status === 'ready') {\n      try {\n        const result = (await this.redis.eval(\n          LUA_TOKEN_BUCKET_SCRIPT,\n          1,\n          key,\n          now.toString(),\n          this.options.windowMs.toString(),\n          this.options.maxRequests.toString()\n        )) as [number, number, number];\n\n        return {\n          allowed: result[0] === 1,\n          limit: this.options.maxRequests,\n          remaining: result[1],\n          resetTimeMs: result[2],\n          source: 'redis',\n        };\n      } catch (err) {\n        console.warn('Redis rate limit check failed, falling back to local memory cache:', err);\n      }\n    }\n\n    // Local memory fallback execution\n    return this.checkMemoryFallback(key, now);\n  }\n\n  private checkMemoryFallback(key: string, now: number): RateLimitResult {\n    const timestamps = this.memoryCache.get(key) || [];\n    const validTimestamps = timestamps.filter((ts) => ts > now - this.options.windowMs);\n\n    if (validTimestamps.length < this.options.maxRequests) {\n      validTimestamps.push(now);\n      this.memoryCache.set(key, validTimestamps);\n      return {\n        allowed: true,\n        limit: this.options.maxRequests,\n        remaining: this.options.maxRequests - validTimestamps.length,\n        resetTimeMs: now + this.options.windowMs,\n        source: 'memory_fallback',\n      };\n    }\n\n    return {\n      allowed: false,\n      limit: this.options.maxRequests,\n      remaining: 0,\n      resetTimeMs: validTimestamps[0] + this.options.windowMs,\n      source: 'memory_fallback',\n    };\n  }\n}"
+      },
+      "conversationMessages": [
+        {
+          "id": "msg-101",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "17:05:12",
+          "content": "Hi! I need to build an HTTP rate limiting module in TypeScript. The module should protect API endpoints from abuse. I want to start by exploring the best algorithms for distributed rate limiting.",
+          "promptTokens": 42,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-102",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "17:05:35",
+          "content": "Here are the 3 standard algorithms for distributed rate limiting:\n\n1. **Fixed Window Counter**: Fast, simple Redis INCR, but suffers from spike bursts at window boundaries.\n2. **Leaky Bucket**: Smooths traffic rate, but queues bursty traffic which adds latency.\n3. **Sliding Window Log / Token Bucket**: Best for accuracy. Uses Redis Sorted Sets (ZADD/ZREMRANGEBYSCORE) to keep exact request timestamps within the window.\n\nFor distributed backend APIs, **Sliding Window Log via Redis** is usually the recommended choice.",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 42,
+          "completionTokens": 148
+        },
+        {
+          "id": "msg-103",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "17:12:40",
+          "content": "Let's go with Sliding Window. Here are my exact requirements:\n- Language: TypeScript\n- Target window: Configurable (default 60 seconds, 100 max requests)\n- Return headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset\n- Please write the core RateLimiter class using ioredis.",
+          "promptTokens": 98,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-104",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "17:13:15",
+          "content": "Here is the first draft implementation using ioredis and sorted sets:\n\n```typescript\nexport class RateLimiter {\n  constructor(private redis: Redis, private options: RateLimitOptions) {}\n\n  async checkLimit(identifier: string) {\n    const key = `ratelimit:${identifier}`;\n    const now = Date.now();\n    const clearBefore = now - this.options.windowMs;\n\n    await this.redis.zremrangebyscore(key, 0, clearBefore);\n    const current = await this.redis.zcard(key);\n\n    if (current < this.options.maxRequests) {\n      await this.redis.zadd(key, now, now);\n      await this.redis.pexpire(key, this.options.windowMs);\n      return { allowed: true, remaining: this.options.maxRequests - current - 1 };\n    }\n    return { allowed: false, remaining: 0 };\n  }\n}\n```",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 98,
+          "completionTokens": 215
+        },
+        {
+          "id": "msg-105",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "17:22:04",
+          "content": "Wait! Look at your `checkLimit` implementation. Under high concurrency, executing `zremrangebyscore`, `zcard`, and `zadd` as three separate round-trips creates a severe race condition. Multiple parallel requests could pass `zcard` before any request executes `zadd`. We need this to be atomic.",
+          "promptTokens": 76,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-106",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "17:22:48",
+          "content": "Spot on! Excellent catch. In a distributed multi-pod environment, separate async calls allow concurrent requests to interleave between ZCARD and ZADD, exceeding the max limit.\n\nWe can solve this by executing the entire sliding window check atomically inside a **Redis Lua Script** using `redis.eval()`.",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 76,
+          "completionTokens": 165
+        },
+        {
+          "id": "msg-107",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "17:34:10",
+          "content": "Great. Please rewrite the Redis interaction into an inline Lua script. Also, what happens if the Redis cluster drops or experiences network partition? I want a local in-memory LRU cache fallback so the API service remains resilient and degrades gracefully.",
+          "promptTokens": 84,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-108",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "17:35:02",
+          "content": "I have updated the design to include:\n1. An inline atomic Lua script passed to Redis EVAL.\n2. A try-catch around Redis operations that gracefully falls back to an in-memory `lru-cache` instance if Redis drops or throws a network error.",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 84,
+          "completionTokens": 240
+        },
+        {
+          "id": "msg-109",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "17:48:15",
+          "content": "I noticed your initial HTTP reset header calculated `Date.now() + windowMs` on blocked requests instead of fetching the score of the oldest timestamp in the sorted set. Let's make sure `resetTimeMs` accurately reflects when the current window expires for the blocked user.",
+          "promptTokens": 62,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-110",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "17:48:50",
+          "content": "Updated! In the Lua script, when limit is exceeded, we execute `ZRANGE key 0 0 WITHSCORES` to fetch the timestamp of the oldest active request in the bucket and calculate `oldest + windowMs`.",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 62,
+          "completionTokens": 130
+        },
+        {
+          "id": "msg-111",
+          "reportId": "rpt-001",
+          "role": "user",
+          "timestamp": "18:15:20",
+          "content": "Perfect. Now let's construct comprehensive Jest unit tests covering: 1) Normal requests within limit, 2) Exceeding limit, 3) Redis failure fallback simulation, and 4) Accurate HTTP header values.",
+          "promptTokens": 55,
+          "completionTokens": 0
+        },
+        {
+          "id": "msg-112",
+          "reportId": "rpt-001",
+          "role": "assistant",
+          "timestamp": "18:16:05",
+          "content": "Generated complete Jest test suite with ioredis-mock and memory fallback assertions. Ready for submission!",
+          "model": "Claude 3.5 Sonnet",
+          "promptTokens": 55,
+          "completionTokens": 180
+        }
+      ],
+      "draftRevisions": [
+        {
+          "id": "rev-201",
+          "reportId": "rpt-001",
+          "version": 1,
+          "timestamp": "17:14:00",
+          "title": "Draft 1: Basic Async ioredis Calls",
+          "description": "First draft using sequential async Redis calls (zremrangebyscore, zcard, zadd).",
+          "diffSummary": "+42 lines initial implementation",
+          "code": "// Draft 1: Non-atomic sequential Redis calls\nasync checkLimit(identifier: string) {\n  const key = `ratelimit:${identifier}`;\n  const now = Date.now();\n  await this.redis.zremrangebyscore(key, 0, now - 60000);\n  const current = await this.redis.zcard(key);\n  if (current < 100) {\n    await this.redis.zadd(key, now, now);\n    return { allowed: true };\n  }\n  return { allowed: false };\n}"
+        },
+        {
+          "id": "rev-202",
+          "reportId": "rpt-001",
+          "version": 2,
+          "timestamp": "17:36:00",
+          "title": "Draft 2: Atomic Lua Script Integration",
+          "description": "Refactored Redis operations into an atomic Lua script to eliminate race conditions.",
+          "diffSummary": "+38 -15 lines (added Lua script & eval execution)",
+          "code": "// Draft 2: Atomic Lua script\nconst LUA_SCRIPT = `\n  local current = redis.call('ZCARD', KEYS[1])\n  if current < tonumber(ARGV[3]) then\n    redis.call('ZADD', KEYS[1], ARGV[1], ARGV[1])\n    return {1, tonumber(ARGV[3]) - current - 1}\n  end\n  return {0, 0}\n`;"
+        },
+        {
+          "id": "rev-203",
+          "reportId": "rpt-001",
+          "version": 3,
+          "timestamp": "18:10:00",
+          "title": "Draft 3: Memory LRU Fallback & Accurate Reset Calculation",
+          "description": "Added LRUCache local memory fallback when Redis is unreachable, and fixed oldest request reset timestamp calculation.",
+          "diffSummary": "+56 -12 lines (added LRUCache fallback and ZRANGE score lookup)",
+          "code": "// Draft 3: Production resilient rate limiter with memory fallback\nif (this.redis && this.redis.status === 'ready') {\n  try {\n    return await this.evalLuaScript(...);\n  } catch (err) {\n    console.warn('Redis down, using memory fallback');\n  }\n}\nreturn this.checkMemoryFallback(key, now);"
+        }
+      ],
+      "evidenceItems": [
+        {
+          "id": "ev-301",
+          "reportId": "rpt-001",
+          "dimension": "delegation",
+          "title": "Modular Task Partitioning",
+          "explanation": "Candidate explicitly structured the prompt sequence into architectural choice, interface contract, and implementation details.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.7,
+          "targetType": "message",
+          "targetId": "msg-103",
+          "timestamp": "17:12:40",
+          "snippet": "Here are my exact requirements: Language: TypeScript, Target window: Configurable..."
+        },
+        {
+          "id": "ev-302",
+          "reportId": "rpt-001",
+          "dimension": "description",
+          "title": "Clear Protocol & Header Constraints",
+          "explanation": "Specified exact HTTP header names (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset) preventing protocol ambiguity.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.6,
+          "targetType": "message",
+          "targetId": "msg-103",
+          "timestamp": "17:12:40",
+          "snippet": "Return headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset"
+        },
+        {
+          "id": "ev-303",
+          "reportId": "rpt-001",
+          "dimension": "discernment",
+          "title": "Caught Non-Atomic Redis Race Condition",
+          "explanation": "Candidate identified that three sequential async Redis calls created a critical race condition under high concurrency and requested an atomic Lua script fix.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.8,
+          "targetType": "message",
+          "targetId": "msg-105",
+          "timestamp": "17:22:04",
+          "snippet": "Executing zremrangebyscore, zcard, and zadd as three separate round-trips creates a severe race condition..."
+        },
+        {
+          "id": "ev-304",
+          "reportId": "rpt-001",
+          "dimension": "diligence",
+          "title": "Resiliency & Local Memory Fallback",
+          "explanation": "Candidate proactively demanded a local LRU cache fallback strategy to ensure API availability when Redis cluster connection drops.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.9,
+          "targetType": "revision",
+          "targetId": "rev-203",
+          "timestamp": "18:10:00",
+          "snippet": "Draft 3: Added LRUCache local memory fallback when Redis is unreachable..."
+        },
+        {
+          "id": "ev-305",
+          "reportId": "rpt-001",
+          "dimension": "discernment",
+          "title": "Initial Reset Header Miscalculation",
+          "explanation": "Candidate initially missed that the AI calculated reset time as Date.now() + windowMs rather than fetching the oldest request timestamp, though caught it later.",
+          "scoreImpact": "negative",
+          "scoreDelta": -0.4,
+          "targetType": "message",
+          "targetId": "msg-109",
+          "timestamp": "17:48:15",
+          "snippet": "I noticed your initial HTTP reset header calculated Date.now() + windowMs instead of fetching the score..."
+        },
+        {
+          "id": "ev-306",
+          "reportId": "rpt-001",
+          "dimension": "diligence",
+          "title": "Comprehensive Edge Case & Failure Testing",
+          "explanation": "Requested unit tests specifically validating Redis cluster node down scenario and sub-millisecond burst limits.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.7,
+          "targetType": "message",
+          "targetId": "msg-111",
+          "timestamp": "18:15:20",
+          "snippet": "Construct comprehensive Jest unit tests covering: Redis failure fallback simulation..."
+        },
+        {
+          "id": "ev-307",
+          "reportId": "rpt-001",
+          "dimension": "delegation",
+          "title": "Effective Boilerplate Delegation",
+          "explanation": "Delegated repetitive test setup code to the assistant while retaining full oversight of assertion validation.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.5,
+          "targetType": "message",
+          "targetId": "msg-111",
+          "timestamp": "18:15:20",
+          "snippet": "Now let's construct comprehensive Jest unit tests..."
+        }
+      ],
+      "verification": null
+    },
+    {
+      "id": "rpt-scoring-in-progress",
+      "status": "SCORING_IN_PROGRESS",
+      "candidate": {
+        "name": "Jordan Rivera",
+        "email": "jordan.rivera@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+        "role": "Full Stack Engineer Candidate"
+      },
+      "task": {
+        "id": "task-graphql-cache",
+        "title": "GraphQL Normalization Cache Plugin",
+        "description": "Build an auto-invalidating client-side GraphQL query response cache with subscription updates.",
+        "timeLimitMinutes": 90,
+        "complexity": "Senior"
+      },
+      "sessionDuration": "1h 15m",
+      "completedAt": "2026-09-27T09:30:00.000Z",
+      "createdAt": "2026-09-27T08:15:00.000Z",
+      "updatedAt": "2026-09-27T09:30:00.000Z",
+      "dimensionScores": [],
+      "finalArtifact": null,
+      "conversationMessages": [],
+      "draftRevisions": [],
+      "evidenceItems": [],
+      "verification": null
+    },
+    {
+      "id": "rpt-scoring-failed",
+      "status": "SCORING_FAILED",
+      "candidate": {
+        "name": "Marcus Vance",
+        "email": "marcus.vance@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+        "role": "Staff Frontend Engineer Candidate"
+      },
+      "task": {
+        "id": "task-canvas-renderer",
+        "title": "WebGL Timeline Renderer",
+        "description": "Implement a high-fps timeline track editor using WebGL and HTML5 Canvas API.",
+        "timeLimitMinutes": 120,
+        "complexity": "Staff"
+      },
+      "sessionDuration": "1h 50m",
+      "completedAt": "2026-09-26T21:00:00.000Z",
+      "createdAt": "2026-09-26T19:10:00.000Z",
+      "updatedAt": "2026-09-26T21:05:00.000Z",
+      "errorMessage": "Session transcript parsing timed out after 30000ms due to corrupted binary telemetry payload (ErrorCode: TRACE_PARSE_504).",
+      "dimensionScores": [],
+      "finalArtifact": null,
+      "conversationMessages": [],
+      "draftRevisions": [],
+      "evidenceItems": [],
+      "verification": null
+    },
+    {
+      "id": "rpt-insufficient-evidence",
+      "status": "INSUFFICIENT_EVIDENCE",
+      "candidate": {
+        "name": "Elena Rostova",
+        "email": "elena.rostova@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+        "role": "Backend Engineering Specialist"
+      },
+      "task": {
+        "id": "task-kafka-consumer",
+        "title": "Idempotent Kafka Consumer Group",
+        "description": "Build a distributed message processing engine with dead-letter-queue retry logic.",
+        "timeLimitMinutes": 90,
+        "complexity": "Mid"
+      },
+      "sessionDuration": "4m 12s",
+      "completedAt": "2026-09-25T14:10:00.000Z",
+      "createdAt": "2026-09-25T14:05:00.000Z",
+      "updatedAt": "2026-09-25T14:10:00.000Z",
+      "errorMessage": "Candidate submitted session within 4 minutes. Less than 2 AI prompt turns detected (Minimum required: 5 messages). Insufficient telemetry to evaluate score dimensions.",
+      "dimensionScores": [],
+      "finalArtifact": null,
+      "conversationMessages": [
+        {
+          "id": "msg-single-1",
+          "reportId": "rpt-insufficient-evidence",
+          "role": "user",
+          "timestamp": "14:06:00",
+          "content": "Generate Kafka consumer code."
+        }
+      ],
+      "draftRevisions": [],
+      "evidenceItems": [],
+      "verification": null
+    },
+    {
+      "id": "rpt-verified-demo",
+      "status": "VERIFIED",
+      "candidate": {
+        "name": "Sofia Rodriguez",
+        "email": "sofia.rodriguez@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+        "role": "Principal Systems Engineer Candidate"
+      },
+      "task": {
+        "id": "task-db-migrator",
+        "title": "Zero-Downtime Database Migration Tool",
+        "description": "Design a dual-write shadow database migration orchestrator with automated rollback triggers.",
+        "timeLimitMinutes": 120,
+        "complexity": "Staff"
+      },
+      "sessionDuration": "1h 55m",
+      "completedAt": "2026-09-24T16:00:00.000Z",
+      "createdAt": "2026-09-24T14:05:00.000Z",
+      "updatedAt": "2026-09-24T16:30:00.000Z",
+      "dimensionScores": [
+        {
+          "id": "ds-v1",
+          "reportId": "rpt-verified-demo",
+          "dimension": "delegation",
+          "score": 4.9,
+          "observation": "Exceptional architectural breakdown into micro-phases.",
+          "keyTakeaway": "Guided AI assistant systematically through zero-downtime shadow write phases."
+        },
+        {
+          "id": "ds-v2",
+          "reportId": "rpt-verified-demo",
+          "dimension": "description",
+          "score": 4.7,
+          "observation": "Crystal clear prompt specifications with explicit SQL transaction safety guarantees.",
+          "keyTakeaway": "High fidelity technical requirements."
+        },
+        {
+          "id": "ds-v3",
+          "reportId": "rpt-verified-demo",
+          "dimension": "discernment",
+          "score": 4.8,
+          "observation": "Caught non-deterministic UUID primary key replication lag in generated code.",
+          "keyTakeaway": "Rigorous security and transactional discernment."
+        },
+        {
+          "id": "ds-v4",
+          "reportId": "rpt-verified-demo",
+          "dimension": "diligence",
+          "score": 5,
+          "observation": "Wrote 100% covered chaos tests for network partition recovery.",
+          "keyTakeaway": "Flawless verification methodology."
+        }
+      ],
+      "finalArtifact": {
+        "id": "art-v1",
+        "reportId": "rpt-verified-demo",
+        "title": "Shadow Write Migration Engine",
+        "filename": "shadow_migrator.ts",
+        "language": "typescript",
+        "summary": "Zero-downtime database migration tool with automated CDC sync and rollback.",
+        "linesOfCode": 240,
+        "content": "// Shadow Migration Engine verified implementation\nexport class ShadowMigrator { ... }"
+      },
+      "conversationMessages": [
+        {
+          "id": "msg-v101",
+          "reportId": "rpt-verified-demo",
+          "role": "user",
+          "timestamp": "14:10:00",
+          "content": "Design shadow write database migration engine."
+        },
+        {
+          "id": "msg-v102",
+          "reportId": "rpt-verified-demo",
+          "role": "assistant",
+          "timestamp": "14:11:00",
+          "content": "Here is the shadow write engine design with Change Data Capture (CDC)."
+        }
+      ],
+      "draftRevisions": [],
+      "evidenceItems": [
+        {
+          "id": "ev-v301",
+          "reportId": "rpt-verified-demo",
+          "dimension": "discernment",
+          "title": "Caught Replication Lag Bug",
+          "explanation": "Sofia identified UUID primary key replication lag in shadow table writes.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.9,
+          "targetType": "message",
+          "targetId": "msg-v101",
+          "timestamp": "14:10:00"
+        }
+      ],
+      "verification": {
+        "id": "ver-001",
+        "reportId": "rpt-verified-demo",
+        "outcome": "VERIFIED",
+        "reviewerName": "Shrishti",
+        "note": "Verified without reservation. Sofia demonstrated outstanding discernment by catching the shadow write replication lag bug and implementing complete chaos test suites.",
+        "createdAt": "2026-09-24T16:30:00.000Z"
+      }
+    },
+    {
+      "id": "rpt-rejected-demo",
+      "status": "REJECTED",
+      "candidate": {
+        "name": "Liam Taylor",
+        "email": "liam.taylor@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80",
+        "role": "Full Stack Engineer Candidate"
+      },
+      "task": {
+        "id": "task-payment-webhook",
+        "title": "Stripe Webhook Signature Verification Handler",
+        "description": "Build secure HMAC-SHA256 signature verification for payment status webhooks.",
+        "timeLimitMinutes": 60,
+        "complexity": "Mid"
+      },
+      "sessionDuration": "45m",
+      "completedAt": "2026-09-23T11:00:00.000Z",
+      "createdAt": "2026-09-23T10:15:00.000Z",
+      "updatedAt": "2026-09-23T11:20:00.000Z",
+      "dimensionScores": [
+        {
+          "id": "ds-r1",
+          "reportId": "rpt-rejected-demo",
+          "dimension": "delegation",
+          "score": 1.5,
+          "observation": "Blindly accepted AI code without specifying security constraints.",
+          "keyTakeaway": "Over-delegated critical security logic."
+        },
+        {
+          "id": "ds-r2",
+          "reportId": "rpt-rejected-demo",
+          "dimension": "description",
+          "score": 2,
+          "observation": "Vague prompts led to standard vulnerability patterns.",
+          "keyTakeaway": "Lack of specification."
+        },
+        {
+          "id": "ds-r3",
+          "reportId": "rpt-rejected-demo",
+          "dimension": "discernment",
+          "score": 1.2,
+          "observation": "Failed to notice timing attack vulnerability in crypto string comparison.",
+          "keyTakeaway": "Zero discernment on security-critical code."
+        },
+        {
+          "id": "ds-r4",
+          "reportId": "rpt-rejected-demo",
+          "dimension": "diligence",
+          "score": 1.8,
+          "observation": "Did not run or write any signature verification tests.",
+          "keyTakeaway": "Insufficient diligence."
+        }
+      ],
+      "finalArtifact": {
+        "id": "art-r1",
+        "reportId": "rpt-rejected-demo",
+        "title": "Stripe Webhook Handler",
+        "filename": "webhook.ts",
+        "language": "typescript",
+        "summary": "Insecure webhook handler using non-constant-time string comparison.",
+        "linesOfCode": 45,
+        "content": "// Vulnerable webhook handler using standard == comparison\nif (signature == expected) { ... }"
+      },
+      "conversationMessages": [
+        {
+          "id": "msg-r101",
+          "reportId": "rpt-rejected-demo",
+          "role": "user",
+          "timestamp": "10:16:00",
+          "content": "Write webhook signature check."
+        }
+      ],
+      "draftRevisions": [],
+      "evidenceItems": [
+        {
+          "id": "ev-r301",
+          "reportId": "rpt-rejected-demo",
+          "dimension": "discernment",
+          "title": "Missed Timing Attack Vulnerability",
+          "explanation": "Candidate accepted unsafe string equality check for HMAC signature instead of timingSafeEqual.",
+          "scoreImpact": "negative",
+          "scoreDelta": -1.5,
+          "targetType": "message",
+          "targetId": "msg-r101",
+          "timestamp": "10:16:00"
+        }
+      ],
+      "verification": {
+        "id": "ver-002",
+        "reportId": "rpt-rejected-demo",
+        "outcome": "REJECTED",
+        "reviewerName": "Hullas",
+        "note": "Rejected report. Candidate blindly copy-pasted vulnerable AI output with non-constant time comparison and wrote zero verification tests.",
+        "createdAt": "2026-09-23T11:20:00.000Z"
+      }
+    },
+    {
+      "id": "rpt-orphaned",
+      "status": "AWAITING_VERIFICATION",
+      "candidate": {
+        "name": "Samira Khan",
+        "email": "samira.khan@example.com",
+        "avatarUrl": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+        "role": "DevOps & Systems Candidate"
+      },
+      "task": {
+        "id": "task-docker-optimizer",
+        "title": "Multi-stage Dockerfile & CI Pipeline",
+        "description": "Optimize container build caching and minimal distroless runtime image.",
+        "timeLimitMinutes": 60,
+        "complexity": "Mid"
+      },
+      "sessionDuration": "48m",
+      "completedAt": "2026-09-26T12:00:00.000Z",
+      "createdAt": "2026-09-26T11:10:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "dimensionScores": [
+        {
+          "id": "ds-o1",
+          "reportId": "rpt-orphaned",
+          "dimension": "delegation",
+          "score": 4,
+          "observation": "Good delegation of Dockerfile multi-stage structure.",
+          "keyTakeaway": "Clean execution."
+        },
+        {
+          "id": "ds-o2",
+          "reportId": "rpt-orphaned",
+          "dimension": "description",
+          "score": 4.1,
+          "observation": "Precise cache layer ordering.",
+          "keyTakeaway": "Good instructions."
+        },
+        {
+          "id": "ds-o3",
+          "reportId": "rpt-orphaned",
+          "dimension": "discernment",
+          "score": 4.2,
+          "observation": "Verified non-root user permissions.",
+          "keyTakeaway": "Security aware."
+        },
+        {
+          "id": "ds-o4",
+          "reportId": "rpt-orphaned",
+          "dimension": "diligence",
+          "score": 4.3,
+          "observation": "Tested image size reduction from 1.2GB to 85MB.",
+          "keyTakeaway": "High performance."
+        }
+      ],
+      "finalArtifact": {
+        "id": "art-o1",
+        "reportId": "rpt-orphaned",
+        "title": "Optimized Multi-Stage Dockerfile",
+        "filename": "Dockerfile",
+        "language": "dockerfile",
+        "summary": "Distroless multi-stage build reducing image footprint.",
+        "linesOfCode": 32,
+        "content": "FROM node:20-alpine AS builder..."
+      },
+      "conversationMessages": [
+        {
+          "id": "msg-o101",
+          "reportId": "rpt-orphaned",
+          "role": "user",
+          "timestamp": "11:15:00",
+          "content": "Create multi-stage Dockerfile for Next.js application."
+        }
+      ],
+      "draftRevisions": [],
+      "evidenceItems": [
+        {
+          "id": "ev-orphaned-1",
+          "reportId": "rpt-orphaned",
+          "dimension": "discernment",
+          "title": "Unlinked Evidence Record (Unavailable Content)",
+          "explanation": "This evidence item points to message ID `msg-missing-999` which was redacted or corrupted, testing how the system handles broken evidence links gracefully.",
+          "scoreImpact": "positive",
+          "scoreDelta": 0.5,
+          "targetType": "message",
+          "targetId": "msg-missing-999",
+          "timestamp": "11:20:00",
+          "isOrphaned": true
+        }
+      ],
+      "verification": null
+    }
+  ]
+}
