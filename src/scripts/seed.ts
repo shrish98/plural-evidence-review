@@ -1,7 +1,7 @@
 import { initDb, seedDatabase } from '../lib/db';
 
 try {
-  console.log('🌱 Initializing SQLite database and seeding synthetic Plural Evidence reports...');
+  console.log('🌱 Initializing JSON file persistence store and seeding synthetic Plural Evidence reports...');
   initDb();
   seedDatabase();
   console.log('✅ Database successfully seeded!');

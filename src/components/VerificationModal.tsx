@@ -9,7 +9,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface VerificationModalProps {
   isOpen: boolean;
@@ -34,6 +34,58 @@ export function VerificationModal({
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const reviewerInputRef = useRef<HTMLInputElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      previousFocusRef.current = document.activeElement as HTMLElement;
+
+      const timer = setTimeout(() => {
+        reviewerInputRef.current?.focus();
+      }, 50);
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
+          return;
+        }
+
+        if (e.key === 'Tab' && dialogRef.current) {
+          const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      };
+
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener('keydown', handleKeyDown);
+        if (previousFocusRef.current && typeof previousFocusRef.current.focus === 'function') {
+          previousFocusRef.current.focus();
+        }
+      };
+    }
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -97,10 +149,12 @@ export function VerificationModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
+      aria-describedby="modal-description"
     >
       <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden space-y-0">
         {/* Modal Header */}
@@ -129,7 +183,7 @@ export function VerificationModal({
               <h3 id="modal-title" className="text-base font-bold text-slate-900">
                 {isVerify ? 'Verify Candidate Report' : 'Reject Candidate Report'}
               </h3>
-              <p className="text-xs text-slate-600">
+              <p id="modal-description" className="text-xs text-slate-600">
                 Candidate: <span className="font-bold text-slate-900">{candidateName}</span> (Report ID: {reportId})
               </p>
             </div>
@@ -173,6 +227,7 @@ export function VerificationModal({
               Reviewer Name <span className="text-rose-500">*</span>
             </label>
             <input
+              ref={reviewerInputRef}
               id="reviewerName"
               type="text"
               required

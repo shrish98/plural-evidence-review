@@ -169,7 +169,7 @@ export function DevStateSwitcher({
             onClick={handleReset}
             disabled={isResetting}
             className="flex items-center gap-1.5 bg-orange-950/40 hover:bg-orange-900/60 border border-orange-700/50 text-orange-300 px-2.5 py-1 rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-50"
-            title="Reset SQLite database to clean seed state"
+            title="Reset database store to clean seed state"
           >
             {isResetting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

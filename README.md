@@ -2,7 +2,7 @@
 
 > **Full-Stack Technical Assignment — Plural App**  
 > **Candidate:** Shrishti  
-> **Stack:** Next.js 16 (App Router), TypeScript, Tailwind CSS, Persistent Database, Vitest & React Testing Library.
+> **Stack:** Next.js 16 (App Router), TypeScript, Tailwind CSS, Persistent JSON Store, Vitest & React Testing Library.
 
 ---
 
@@ -26,7 +26,7 @@ npm install
 ```
 
 ### 2. Database Seeding
-To populate the persistent database with synthetic reports for all 9 product states:
+To populate the persistent database store (`plural_db.json`) with synthetic reports for all 9 product states:
 ```bash
 npm run seed
 ```
@@ -76,12 +76,18 @@ The application follows a clean Next.js App Router architecture with strict comp
         └── POST /api/reset               -> Reset database to seed state
         │
         ▼ (Database Access)
-[ Persistent JSON File DB (`plural_db.json`) ]
+[ Persistent JSON File Store (`plural_db.json`) ]
 ```
 
 ---
 
-## 📊 Data Model
+## 📊 Data Model & Persistence Architecture
+
+Data is stored using a persistent JSON file engine (`plural_db.json`) wrapped in an isolated access layer (`db.ts`).
+
+### Why JSON File Persistence over Native C++ SQLite?
+- **Zero-Dependency Portability**: Eliminates native C++ compilation (`node-gyp`, Python, platform-specific binaries), ensuring clean cross-platform `npm install` execution across Windows, macOS, and Linux without native build errors or peer-dependency flags.
+- **Atomic Operations**: Safe filesystem reads and writes preserve verification states across server restarts while maintaining synchronous transactional guarantees for seed resets.
 
 ```typescript
 export interface FullReport {
@@ -108,11 +114,11 @@ export interface FullReport {
 ## 🔗 Evidence-Linking & URL State Strategy
 
 1. **Deep-Linkable URL Representation**:
-   Selecting an evidence item updates the URL query parameter `?evidence=<evidence_id>` via `router.push(..., { scroll: false })` without causing a page reload. This URL state survives page refreshes and can be shared directly with team members.
+   Selecting an evidence item updates the URL query parameter `?evidence=<evidence_id>` via `router.push(..., { scroll: false })` without causing a full page reload.
 
-2. **Smooth Target Scrolling & Keyboard Focus**:
-   Upon evidence selection:
-   - The application resolves the target element ID (`msg-<id>` or `rev-<id>`).
+2. **Smooth Target Scrolling & Keyboard Focus (On Selection & On Page Refresh)**:
+   Whether triggered by an evidence card click OR on initial page load / refresh with `?evidence=<id>` in the URL:
+   - Resolves the target element ID (`msg-<id>` or `rev-<id>`).
    - Executes `element.scrollIntoView({ behavior: 'smooth', block: 'center' })`.
    - Programmatically shifts keyboard focus onto the target element (`element.focus()`).
 
@@ -127,16 +133,17 @@ export interface FullReport {
 ## ♿ Accessibility Decisions
 
 - **Color Independence**: Every status badge, score meter, and evidence impact tag pairs color with explicit text labels, star ratings (`★★★★☆`), and visual icons (`PlusCircle`, `MinusCircle`, `CheckCircle2`).
-- **Visible Focus Outlines**: All interactive buttons, cards, inputs, and tab stops implement visible focus indicators (`focus-visible:ring-2 focus-visible:ring-indigo-500`).
-- **Keyboard Navigation**: Full keyboard navigation support (Card selection via `Enter` / `Space`, input focus, focus trap in modal dialogs).
-- **ARIA Semantics**: Proper ARIA roles (`role="status"`, `role="dialog"`, `aria-live="polite"`, `aria-modal="true"`, `aria-valuenow`).
+- **Focus Management & Focus Traps**: The Verification modal dialog (`VerificationModal.tsx`) automatically traps keyboard focus when active, focuses the initial input field on open, closes on `Escape` keypress, and restores focus back to the triggering button upon dismissal.
+- **Visible Focus Outlines**: All interactive buttons, cards, inputs, and tab stops implement visible focus indicators (`focus-visible:ring-2 focus-visible:ring-orange-500`).
+- **Keyboard Navigation**: Full keyboard navigation support (Card selection via `Enter` / `Space`, input focus, tab cycles).
+- **ARIA Semantics**: Proper ARIA roles (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`, `aria-describedby`, `aria-live="polite"`).
 
 ---
 
 ## 🔒 Idempotency & Duplicate Submission Strategy
 
 To ensure verification operations are safe against network retries or double-clicking:
-1. **Database Check**: The backend handler `submitVerification(reportId, payload)` inspects whether a `verification_record` already exists for `reportId`.
+1. **Database Check**: The backend handler `submitVerification(reportId, payload)` inspects whether a `verification` record already exists for `reportId`.
 2. **Conflict Prevention**: If a record exists, the API skips insertion and safely returns the existing record with `alreadySubmitted: true` and status `200 OK`.
 3. **Read-Only Lock**: Once verified or rejected, the frontend renders an immutable decision summary banner and disables verification triggers.
 
@@ -155,7 +162,7 @@ Located in `src/__tests__/`:
 
 1. **Transcript Telemetry Virtualization**: For sessions with 1,000+ messages, implement `@tanstack/react-virtual` list windowing to maintain 60 FPS scrolling.
 2. **Side-by-Side Diff Viewer**: A full Git side-by-side split diff viewer for draft revisions comparing any arbitrary revision against the final artifact.
-3. **Real-time Session Observation**: WebSocket server events pushing live prompt turns while candidate work sessions are in progress.
+3. **Status Registry Architecture**: Refactor status state rendering into a modular status component registry map to simplify extending new product pipeline states.
 
 ---
 

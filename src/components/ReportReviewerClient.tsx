@@ -80,16 +80,8 @@ export function ReportReviewerClient({ initialReportId }: ReportReviewerClientPr
     fetchReport(reportId);
   }, [reportId, fetchReport]);
 
-  // 2. URL State & Evidence Selection Sync Handler
-  const handleSelectEvidence = (evidence: EvidenceItem) => {
-    setSelectedEvidenceId(evidence.id);
-
-    // Update URL query parameter without page reload
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('evidence', evidence.id);
-    router.push(`${pathname}?${params.toString()}`, { scroll: false });
-
-    // Handle jump to target message/revision & focus
+  // Helper to scroll & focus target element
+  const scrollToTarget = useCallback((evidence: EvidenceItem) => {
     if (evidence.targetId && !evidence.isOrphaned) {
       setTimeout(() => {
         const prefix = evidence.targetType === 'message' ? 'msg-' : 'rev-';
@@ -99,8 +91,21 @@ export function ReportReviewerClient({ initialReportId }: ReportReviewerClientPr
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
           targetElement.focus();
         }
-      }, 100);
+      }, 150);
     }
+  }, []);
+
+  // 2. URL State & Evidence Selection Sync Handler
+  const handleSelectEvidence = (evidence: EvidenceItem) => {
+    setSelectedEvidenceId(evidence.id);
+
+    // Update URL query parameter without page reload
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('evidence', evidence.id);
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+
+    // Scroll & focus target element
+    scrollToTarget(evidence);
   };
 
   // Sync state if URL evidence query param changes directly (e.g., refresh or browser back)
@@ -110,6 +115,16 @@ export function ReportReviewerClient({ initialReportId }: ReportReviewerClientPr
       setSelectedEvidenceId(evidenceFromUrl);
     }
   }, [searchParams, selectedEvidenceId]);
+
+  // Restore scroll & focus on mount/refresh when report finishes loading and selectedEvidenceId is set
+  useEffect(() => {
+    if (!isLoading && report && selectedEvidenceId) {
+      const activeEv = report.evidenceItems.find((e) => e.id === selectedEvidenceId);
+      if (activeEv) {
+        scrollToTarget(activeEv);
+      }
+    }
+  }, [isLoading, report, selectedEvidenceId, scrollToTarget]);
 
   // 3. Reset Database Handler
   const handleResetDatabase = async () => {
